@@ -4,6 +4,7 @@ import { builderSchema, elementSchema } from '$docs/utils/index.js';
 import { comboboxEvents } from '$lib/builders/combobox/events.js';
 import type { BuilderData } from './index.js';
 import { getMenuArrowSchema } from './menu.js';
+import {autocompleteTagsEvents} from "$lib/builders/autocomplete-tags/events";
 
 /**
  * Props that are also returned in the form of stores via the `options` property.
@@ -46,6 +47,12 @@ const builder = builderSchema(BUILDER_NAME, {
 			description: 'A callback that is called when the selected item changes.',
 			see: SEE.CHANGE_FUNCTIONS,
 		},
+		{
+			name: 'multiple',
+			type: 'boolean',
+			default: 'false',
+			description: 'Whether or not the combobox is a multiple combobox, required for tags.',
+		},
 		PROPS.DEFAULT_OPEN,
 		PROPS.OPEN,
 		PROPS.ON_OPEN_CHANGE,
@@ -73,6 +80,30 @@ const builder = builderSchema(BUILDER_NAME, {
 		{
 			name: 'label',
 			description: 'The builder store used to create the label for the combobox.',
+		},
+		{
+			name: 'root',
+			description: 'The builder store used to create the tags container root.',
+		},
+		{
+			name: 'tag',
+			description: 'The builder store used to create the tag.',
+		},
+		{
+			name: 'deleteTrigger',
+			description: 'The builder store used to create the tags delete trigger.',
+		},
+		{
+			name: 'separator',
+			description: 'The builder store used to create the combobox separator.',
+		},
+		{
+			name: 'group',
+			description: 'The builder store used to create the combobox group.',
+		},
+		{
+			name: 'groupLabel',
+			description: 'The builder store used to create the combobox group label.',
 		},
 	],
 	states: [
@@ -205,6 +236,161 @@ const label = elementSchema('label', {
 
 const arrow = getMenuArrowSchema(BUILDER_NAME);
 
+const separator = elementSchema('separator', {
+	description: 'An optional separator element',
+	dataAttributes: [
+		{
+			name: 'data-melt-select-separator',
+			value: ATTRS.MELT('separator'),
+		},
+	],
+});
+
+const group = elementSchema('group', {
+	description: 'A function which takes in a unique key to group options together.',
+	props: [
+		{
+			name: 'key',
+			type: 'string',
+			description: 'A unique key for the group.',
+		},
+	],
+	dataAttributes: [
+		{
+			name: 'data-melt-select-group',
+			value: ATTRS.MELT('group'),
+		},
+	],
+});
+
+const groupLabel = elementSchema('groupLabel', {
+	description: 'A function which takes in a unique key to group options together.',
+	props: [
+		{
+			name: 'key',
+			type: 'string',
+			description: 'A unique key for the group.',
+		},
+	],
+	dataAttributes: [
+		{
+			name: 'data-melt-select-group-label',
+			value: ATTRS.MELT('group-label'),
+		},
+	],
+});
+
+const root = elementSchema('root', {
+	description: 'The root autocomplete tags component.',
+	dataAttributes: [
+		{
+			name: 'data-disabled',
+			value: ATTRS.DISABLED('combobox input'),
+		},
+		{
+			name: 'data-focus',
+			value: 'Present if the tags input is focused.',
+		},
+		{
+			name: 'data-melt-combobox-root',
+			value: ATTRS.MELT('combobox input'),
+		},
+	],
+	events: comboboxEvents['root'],
+});
+
+const tag = elementSchema('tag', {
+	description: 'The tag components.',
+	props: [
+		{
+			name: 'value',
+			type: 'T',
+			description: "The tag's value",
+			required: true,
+		},
+		{
+			name: 'label',
+			type: 'string',
+			description: 'The label of the tag. When not present, the text content will be used.',
+		},
+		{
+			name: 'disabled',
+			type: 'boolean',
+			default: 'false',
+			description: 'Whether or not the `tag` is disabled.',
+		},
+	],
+	dataAttributes: [
+		{
+			name: 'data-tag-label',
+			value: 'The label of the tag',
+		},
+		{
+			name: 'data-tag-value',
+			value: 'The value of the tag',
+		},
+		{
+			name: 'data-disabled',
+			value: ATTRS.DISABLED('tag'),
+		},
+		{
+			name: 'data-selected',
+			value: ATTRS.SELECTED('tag'),
+		},
+		{
+			name: 'data-melt-combobox-tag',
+			value: ATTRS.MELT('tag'),
+		},
+	],
+	events: comboboxEvents['tag'],
+});
+
+const deleteTrigger = elementSchema('deleteTrigger', {
+	description: 'The button component used to delete a tag.',
+	props: [
+		{
+			name: 'value',
+			type: 'T',
+			description: "The tag's value",
+			required: true,
+		},
+		{
+			name: 'label',
+			type: 'string',
+			description: 'The label of the tag. When not present, the text content will be used.',
+		},
+		{
+			name: 'disabled',
+			type: 'boolean',
+			default: 'false',
+			description: 'Whether or not the `tag` is disabled.',
+		},
+	],
+	dataAttributes: [
+		{
+			name: 'data-tag-value',
+			value: 'The value of the tag associated with the delete trigger',
+		},
+		{
+			name: 'data-tag-value',
+			value: 'The value of the tag associated with the delete trigger.',
+		},
+		{
+			name: 'data-disabled',
+			value: ATTRS.DISABLED('delete trigger'),
+		},
+		{
+			name: 'data-selected',
+			value: ATTRS.SELECTED('delete trigger'),
+		},
+		{
+			name: 'data-melt-combobox-delete-trigger',
+			value: ATTRS.MELT('delete trigger'),
+		},
+	],
+	events: comboboxEvents['deleteTrigger'],
+});
+
 const keyboard: KeyboardSchema = [
 	{
 		key: KBD.ENTER,
@@ -235,13 +421,21 @@ const keyboard: KeyboardSchema = [
 		behavior: 'Highlights the last list item',
 	},
 	{
+		key: KBD.ARROW_LEFT,
+		behavior: 'Highlights the previous tag.',
+	},
+	{
+		key: KBD.ARROW_RIGHT,
+		behavior: 'Highlights the next tag.',
+	},
+	{
 		key: KBD.ESCAPE,
 		behavior:
 			"When focus is on the `input` and it's closed, removes focus. When the `input` is open, closes the list.",
 	},
 ];
 
-const schemas = [builder, menu, input, item, label, arrow];
+const schemas = [builder, menu, input, item, label, arrow, separator, group, groupLabel, root, tag, deleteTrigger];
 
 const features = [
 	'Full keyboard navigation',

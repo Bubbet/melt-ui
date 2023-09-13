@@ -32,13 +32,14 @@ import {
 	removeScroll,
 	sleep,
 	styleToString,
-	toWritableStores,
+	toWritableStores, toggle,
 } from '$lib/internal/helpers/index.js';
 import type { Defaults, MeltActionReturn } from '$lib/internal/types.js';
 import { dequal as deepEqual } from 'dequal';
 import { onMount, tick } from 'svelte';
-import { derived, get, writable, type Readable, type Writable } from 'svelte/store';
+import { derived, get, writable, type Readable } from 'svelte/store';
 import { createLabel } from '../label/create.js';
+import { createSeparator } from '../separator/create.js';
 import type { ComboboxEvents } from './events.js';
 import type { ComboboxItemProps, ComboboxOption, CreateComboboxProps } from './types.js';
 
@@ -60,7 +61,7 @@ const defaults = {
 	portal: undefined,
 } satisfies Defaults<CreateComboboxProps<unknown>>;
 
-const { name, selector } = createElHelpers('combobox');
+const { name, selector, attribute } = createElHelpers('combobox');
 
 /**
  * Creates an ARIA-1.2-compliant combobox.
@@ -69,8 +70,13 @@ const { name, selector } = createElHelpers('combobox');
  * @TODO would it be useful to have a callback for when an item is selected?
  * @TODO multi-select using `tags-input` builder?
  */
-export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
-	const withDefaults = { ...defaults, ...props } satisfies CreateComboboxProps<Value>;
+export function createCombobox<Value,
+	Multiple extends boolean = false,
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	Selected extends Multiple extends true
+		? Array<ComboboxOption<Value>>
+		: ComboboxOption<Value> = Multiple extends true ? Array<ComboboxOption<Value>> : ComboboxOption<Value>>(props?: CreateComboboxProps<Value, Multiple, Selected>) {
+	const withDefaults = { ...defaults, ...props } satisfies CreateComboboxProps<Value, Multiple, Selected>;
 
 	// Trigger element for the popper portal. This will be our input element.
 	const activeTrigger = writable<HTMLElement | null>(null);
@@ -78,8 +84,7 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 	const highlightedItem = writable<HTMLElement | null>(null);
 
 	const selectedWritable =
-		withDefaults.selected ??
-		(writable(withDefaults.defaultSelected) as Writable<ComboboxOption<Value> | undefined>);
+		withDefaults.selected ?? (writable((withDefaults.defaultSelected ?? withDefaults.multiple ? [] as Array<ComboboxOption<Value>> : undefined) as Selected));
 	const selected = overridable(selectedWritable, withDefaults?.onSelectedChange);
 
 	const highlighted = derived(highlightedItem, ($highlightedItem) =>
@@ -87,14 +92,19 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 	) as Readable<ComboboxOption<Value> | undefined>;
 
 	// The current value of the input element.
-	const inputValue = writable(withDefaults.defaultSelected?.label ?? '');
+	const inputValue = writable(
+	!Array.isArray(withDefaults.defaultSelected) ? withDefaults.defaultSelected?.label ?? '' : ''
+	);
 
 	// Either the provided open store or a store with the default open value
 	const openWritable = withDefaults.open ?? writable(false);
 	// The overridable open store which is the source of truth for the open state.
 	const open = overridable(openWritable, withDefaults?.onOpenChange);
 
-	const options = toWritableStores(omit(withDefaults, 'open', 'defaultOpen'));
+	const options = toWritableStores({
+		...omit(withDefaults, 'open', 'defaultOpen'), 
+		multiple: withDefaults.multiple ?? (false as Multiple)
+	});
 
 	const {
 		scrollAlignment,
@@ -105,6 +115,7 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 		portal,
 		forceVisible,
 		positioning,
+		multiple
 	} = options;
 
 	const touchedInput = writable(false);
@@ -112,6 +123,7 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 		input: generateId(),
 		menu: generateId(),
 		label: generateId(),
+		root: generateId(),
 	};
 
 	/** ------- */
@@ -129,19 +141,37 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 		};
 	}
 
+	function getTags(el: HTMLElement) {
+		return Array.from(el.querySelectorAll(selector('tag'))).filter(
+			(el): el is HTMLElement => isHTMLElement(el)
+		)
+	}
+
 	/** Resets the combobox inputValue and filteredItems back to the selectedItem */
 	function reset() {
 		const $selectedItem = get(selected);
 
 		// If no item is selected the input should be cleared and the filter reset.
-		if (!$selectedItem) {
+		if (!$selectedItem || multiple) {
 			inputValue.set('');
 		} else {
-			inputValue.set(get(selected)?.label ?? '');
+			inputValue.set((get(selected) as ComboboxOption<Value>)?.label ?? '');
 		}
 
 		touchedInput.set(false);
 	}
+
+	const setOption = (newOption: ComboboxOption<Value>) => {
+		selected.update(($option) => {
+			const $multiple = get(multiple);
+			if ($multiple) {
+				const optionArr = Array.isArray($option) ? $option : [];
+				return toggle(newOption, optionArr) as Selected;
+			}
+			return newOption as Selected;
+		});
+	};
+
 
 	/**
 	 * Selects an item from the menu and updates the input value.
@@ -150,8 +180,10 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 	function selectItem(item: HTMLElement) {
 		const props = getOptionProps(item);
 
-		selected.set(props);
-		inputValue.set(props.label ?? '');
+		setOption(props)
+		
+		if (!get(multiple))
+			inputValue.set(props.label ?? '');
 
 		const activeTrigger = getElementByMeltId(ids.input);
 		if (activeTrigger) {
@@ -175,7 +207,7 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 			open.set(true);
 		}
 
-		const triggerEl = getElementByMeltId(ids.input);
+		const triggerEl = getElementByMeltId(ids.root) ?? getElementByMeltId(ids.input);
 		if (!triggerEl) return;
 
 		// The active trigger is used to anchor the menu to the input element.
@@ -209,8 +241,13 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 	 * Determines if a given item is selected.
 	 * This is useful for displaying additional markup on the selected item.
 	 */
-	const isSelected = derived([selected], ([$value]) => {
-		return (item: Value) => deepEqual($value?.value, item);
+	const isSelected = derived([selected], ([$selected]) => {
+		return (value: Value) => {
+			if (Array.isArray($selected)) {
+				return $selected.map((o) => o.value).includes(value);
+			}
+			return deepEqual($selected?.value, value);
+		};
 	});
 
 	/**
@@ -254,7 +291,70 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 					openMenu($open);
 				}),
 				// Handle all input key events including typing, meta, and navigation.
-				addMeltEventListener(node, 'keydown', (e) => {
+				addMeltEventListener(node, 'keydown', async (e) => {
+					if (e.key === kbd.ENTER) {
+						const $highlightedItem = get(highlightedItem);
+						if ($highlightedItem) {
+							selectItem($highlightedItem);
+						}
+						closeMenu();
+					}
+					if ((e.key === kbd.ARROW_LEFT || e.key === kbd.ARROW_RIGHT)) {
+						const rootEl = getElementByMeltId(ids.root);
+						if (rootEl) {
+							let candidateNodes: Array<HTMLElement> = getTags(rootEl)
+							// Get the index of the currently highlighted item.
+							const $currentItem = get(highlightedItem);
+							const currentIndex = $currentItem ? candidateNodes.indexOf($currentItem) : -1;
+							const $loop = get(loop);
+							let nextItem: HTMLElement | null = null;
+
+							await tick()
+							if ($currentItem !== null && candidateNodes.includes($currentItem)) {
+								switch (e.key) {
+									case kbd.ARROW_RIGHT:
+										nextItem = next(candidateNodes, currentIndex, $loop);
+										if (nextItem === candidateNodes[0]) {
+											node.selectionStart = node.selectionEnd = 0;
+											e.preventDefault();
+											highlightedItem.set(null);
+											return;
+										}
+										break;
+									case kbd.ARROW_LEFT:
+										nextItem = prev(candidateNodes, currentIndex, $loop);
+										if (nextItem === last(candidateNodes)) {
+											node.selectionStart = node.selectionEnd = node.value.length;
+											e.preventDefault();
+											highlightedItem.set(null);
+											return;
+										}
+										break;
+									default:
+										return;
+								}
+								e.preventDefault()
+							} else if (e.key === kbd.ARROW_RIGHT && node.selectionStart === node.value.length) {
+								nextItem = candidateNodes[0]
+							} else if (e.key === kbd.ARROW_LEFT && node.selectionStart === 0) {
+								nextItem = last(candidateNodes)
+							}
+							// Highlight the new item.
+							highlightedItem.set(nextItem);
+							return;
+						}
+					}
+
+					if (e.key === kbd.BACKSPACE && node.value === '') {
+						const rootEl = getElementByMeltId(ids.root);
+						if (rootEl) {
+							const tags = getTags(rootEl);
+							if (tags.length > 0)
+								selectItem(last(tags));
+						}
+						return;
+					}
+
 					const $open = get(open);
 					/**
 					 * When the menu is closed...
@@ -365,7 +465,7 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 						}
 						// Highlight the new item and scroll it into view.
 						highlightedItem.set(nextItem);
-						nextItem.scrollIntoView({ block: $scrollAlignment });
+						nextItem.scrollIntoView({block: $scrollAlignment});
 					}
 				}),
 				// Listens to the input value and filters the items accordingly.
@@ -533,7 +633,7 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 		returned:
 			([$selected]) =>
 			(props: ComboboxItemProps<Value>) => {
-				const selected = deepEqual(props.value, $selected?.value);
+				const selected = Array.isArray($selected) ? $selected.map((o) => o.value).includes(props.value) : deepEqual($selected?.value, props.value);
 
 				return {
 					'data-value': JSON.stringify(props.value),
@@ -574,6 +674,166 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 		},
 	});
 
+	const root = builder(name(''), {
+		returned: () => {
+			return {
+				'data-melt-id': ids.root,
+				id: ids.root
+			} as const;
+		},
+		action: (node: HTMLElement): MeltActionReturn<ComboboxEvents['root']> => {
+			const unsub = executeCallbacks(
+				addMeltEventListener(node, 'mousedown', (e) => {
+					// Focus on input when root is the target
+					const target = e.target;
+					if (!isHTMLElement(target)) return;
+					if (target.hasAttribute(attribute())) {
+						e.preventDefault();
+						const activeTrigger = getElementByMeltId(ids.input);
+						if (activeTrigger) {
+							activeTrigger.focus();
+						}
+					}
+				})
+			);
+
+			return {
+				destroy: unsub,
+			};
+		},
+	});
+
+	const tag = builder(name('tag'), {
+		stores: [selected],
+		returned: ([$selected]) => {
+			return (tag: ComboboxItemProps<Value>) => {
+				const disabled = tag.disabled;
+				const selected = disabled ? undefined : Array.isArray($selected) ? $selected.map((o) => o.value).includes(tag.value) : deepEqual($selected?.value, tag.value);
+
+				return {
+					'aria-selected': selected,
+					'data-label': tag.label,
+					'data-value': JSON.stringify(tag.value),
+					'data-selected': selected ? '' : undefined,
+					'data-disabled': disabledAttr(disabled),
+					disabled: disabledAttr(disabled),
+					id: generateId(),
+					tabindex: -1,
+				};
+			};
+		},
+		action: (node: HTMLDivElement): MeltActionReturn<ComboboxEvents['tag']> => {
+			const getElProps = () => {
+				const id = node.getAttribute('data-tag-id') ?? '';
+
+				return {
+					id,
+				};
+			};
+
+			const unsub = executeCallbacks(
+				addMeltEventListener(node, 'pointermove', () => {
+					// If the item is disabled, clear the highlight.
+					if (isElementDisabled(node)) {
+						highlightedItem.set(null);
+						return;
+					}
+					// Otherwise, proceed.
+					highlightedItem.set(node);
+				}),
+				addMeltEventListener(node, 'mousedown', (e) => {
+					// Focus on the input and set this as the selected tag
+					const activeTrigger = getElementByMeltId(ids.input);
+					if (activeTrigger) {
+						activeTrigger.focus();
+					}
+					e.preventDefault();
+					highlightedItem.set(node);
+				}),
+				addMeltEventListener(node, 'click', (e) => {
+					// Focus on the input and set this as the selected tag
+					const activeTrigger = getElementByMeltId(ids.input);
+					if (activeTrigger) {
+						activeTrigger.focus();
+					}
+					e.preventDefault();
+					highlightedItem.set(node);
+				})
+			);
+
+			return {
+				destroy: unsub,
+			};
+		},
+	});
+
+	const deleteTrigger = builder(name('delete-trigger'), {
+		stores: [selected],
+		returned: ([$selected]) => {
+			return (tag: ComboboxItemProps<Value>) => {
+				const disabled = tag.disabled;
+				const selected = disabled ? undefined : Array.isArray($selected) ? $selected.map((o) => o.value).includes(tag.value) : deepEqual($selected?.value, tag.value);
+
+				return {
+					'aria-selected': selected,
+					'data-label': tag.label,
+					'data-value': JSON.stringify(tag.value),
+					'data-selected': selected ? '' : undefined,
+					'data-disabled': disabledAttr(disabled),
+					disabled: disabledAttr(disabled),
+					tabindex: -1,
+				};
+			};
+		},
+		action: (node: HTMLElement): MeltActionReturn<ComboboxEvents['deleteTrigger']> => {
+			function handleDelete() {
+				if (node.hasAttribute('data-disabled')) return;
+				selectItem(node);
+			}
+
+			const unsub = executeCallbacks(
+				addMeltEventListener(node, 'click', (e) => {
+					// Do nothing when disabled
+					e.stopPropagation();
+					handleDelete();
+				}),
+				addMeltEventListener(node, 'keydown', (e) => {
+					if (e.key !== kbd.ENTER && e.key !== kbd.SPACE) return;
+					e.preventDefault();
+					handleDelete();
+				})
+			);
+
+			return {
+				destroy: unsub,
+			};
+		},
+	});
+
+	const {
+		elements: { root: separator },
+	} = createSeparator({
+		decorative: true,
+	});
+
+
+	const group = builder(name('group'), {
+		returned: () => {
+			return (groupId: string) => ({
+				role: 'group',
+				'aria-labelledby': groupId,
+			});
+		},
+	});
+
+	const groupLabel = builder(name('group-label'), {
+		returned: () => {
+			return (groupId: string) => ({
+				id: groupId,
+			});
+		},
+	});
+
 	/** ------------------- */
 	/** LIFECYCLE & EFFECTS */
 	/** ------------------- */
@@ -604,17 +864,29 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 	effect([highlightedItem, scrollAlignment], ([$highlightedItem, $scrollAlignment]) => {
 		if (!isBrowser) return;
 		const menuElement = document.getElementById(ids.menu);
-		if (!isHTMLElement(menuElement)) return;
-		getOptions(menuElement).forEach((node) => {
+		if (isHTMLElement(menuElement)) {
+			getOptions(menuElement).forEach((node) => {
+				if (node === $highlightedItem) {
+					addHighlight(node);
+				} else {
+					removeHighlight(node);
+				}
+			});
+
+			if ($highlightedItem) {
+				sleep(1).then(() => $highlightedItem.scrollIntoView({block: $scrollAlignment}));
+			}
+		}
+
+		const rootElement = document.getElementById(ids.root);
+		if (!isHTMLElement(rootElement)) return;
+		getTags(rootElement).forEach((node) => {
 			if (node === $highlightedItem) {
 				addHighlight(node);
 			} else {
 				removeHighlight(node);
 			}
 		});
-		if ($highlightedItem) {
-			sleep(1).then(() => $highlightedItem.scrollIntoView({ block: $scrollAlignment }));
-		}
 	});
 
 	return {
@@ -623,6 +895,12 @@ export function createCombobox<Value>(props?: CreateComboboxProps<Value>) {
 			option,
 			menu,
 			label,
+			root,
+			tag,
+			deleteTrigger,
+			separator,
+			group,
+			groupLabel
 		},
 		states: {
 			open,

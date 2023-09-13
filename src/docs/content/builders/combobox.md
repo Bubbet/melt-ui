@@ -21,6 +21,21 @@ description:
   - **Item**: The individual list item
   - **Label**: The label for the input
   - **Arrow**: An optional arrow element which points to the menu's input
+- **Root**: The root container for the tags
+  - **Tag**: The tag container for an individual tag
+  - **Delete Trigger**: The button container, to delete an individual tag
+
+## Example components
+
+### Autocomplete Tags
+
+Autocomplete tags allow the user to select multiple options and have them display as tags for easy removal. To create a
+autocomplete tags, simply set the `multiple` prop to `true` on the `createCombobox` builder.
+
+<Preview code={snippets.tags}>
+    <svelte:component this={previews.tags} />
+</Preview>
+
 
 ## API Reference
 
