@@ -4,7 +4,6 @@ import { builderSchema, elementSchema } from '$docs/utils/index.js';
 import { comboboxEvents } from '$lib/builders/combobox/events.js';
 import type { BuilderData } from './index.js';
 import { getMenuArrowSchema } from './menu.js';
-import {autocompleteTagsEvents} from "$lib/builders/autocomplete-tags/events";
 
 /**
  * Props that are also returned in the form of stores via the `options` property.
