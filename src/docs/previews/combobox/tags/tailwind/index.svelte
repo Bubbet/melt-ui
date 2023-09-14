@@ -37,6 +37,7 @@
     
     $: filteredOptions = Object.fromEntries(Object.entries(options).map(([key, value]) => {
             return [key, value.filter((choice) => {
+                //if (($selected as ComboboxOption<Array<Choice>>).some(x => x.value === choice.value)) return false; // Exclude selected options from dropdown
                 const {label} = choice;
                 const normalizedInput = $inputValue.toLowerCase();
                 return (
