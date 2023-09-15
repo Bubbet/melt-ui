@@ -1,5 +1,11 @@
 # @melt-ui/svelte
 
+## 0.50.0
+
+### Minor Changes
+
+- 9dd563db: Add new autocomplete tags builder.
+
 ## 0.49.0
 
 ### Minor Changes
